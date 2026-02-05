@@ -2,8 +2,8 @@ import Image from "next/image";
 
 export default function Home() {
   return (
-    <div>
-      <>hello world!!</>
+    <div className="flex justify-center">
+      
       <Image src={'/logo.png'} alt='logo'
                   width = {400}
                   height = {100}
