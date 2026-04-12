@@ -23,11 +23,15 @@ function AppSidebar() {
   return (
     <Sidebar>
       <SidebarHeader className='flex items-center mt-5'>
+        <Link href="/">
         <Image src={'/logo.png'} alt='logo' width={200}
             height={100}
-            className="w-[150px]"
+            className="w-37.5"
         />
+        </Link>
+        <Link href={'/dashboard/create-interview'}> 
         <Button className='w-full mt-5'> <Plus /> Create New Interview </Button>
+        </Link>
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>

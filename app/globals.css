@@ -1,13 +1,12 @@
 @import "tailwindcss";
 @import "tw-animate-css";
-@import "tw-animate-css";
 
 @custom-variant dark (&:is(.dark *));
 
 
 @layer base {
   :root {
-    --sidebar: oklch(0.985 0 0);
+    --sidebar: oklch(98.511% 0.00011 271.152);
     --sidebar-foreground: oklch(0.145 0 0);
     --sidebar-primary: oklch(0.205 0 0);
     --sidebar-primary-foreground: oklch(0.985 0 0);

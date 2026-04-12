@@ -6,10 +6,14 @@ import { Button } from "@/components/ui/button"
 import { supabase } from '@/services/supabaseClient';
 function Login() {
 
+
   /* SignIn Function */ 
   const signInWithGoogle = async() => {
     const {error} = await supabase.auth.signInWithOAuth({
-      provider:'google'
+      provider:'google',
+      options: {
+      redirectTo: `${location.origin}/dashboard`,
+    },
     })
 
     if (error) {

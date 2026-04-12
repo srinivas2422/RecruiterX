@@ -62,75 +62,109 @@ function Interview() {
 
   console.log(interviewInfo);
   return (
-    <div className="px-10 mt-5">
-      <div
-        className="flex flex-col items-center 
-        justify-center border rounded-lg bg-white
-        p-7 mb-20"
-      >
-        <Image
-          src={"/logo.png"}
-          alt="logo"
-          width={200}
-          height={100}
-          className="w-35"
-        />
-        <h2 className="mt-3">AI-Powered Interview Platform</h2>
-        <Image
-          src={"/interview.jpg"}
-          alt="interview"
-          width={300}
-          height={300}
-          className="w-70 my-6"
-        />
-        <h2 className="font-bold text-xl">{interviewData?.jobPosition}</h2>
-        <h2 className="flex gap-2 items-center text-gray-500 mt-3">
-          {" "}
-          <Clock className="h-4 w-4" /> {interviewData?.duration}
+    <div className="px-6 md:px-10 mt-10 flex justify-center">
+  <div
+    className="w-full max-w-2xl flex flex-col items-center 
+    border border-slate-200 rounded-3xl 
+    bg-white/80 backdrop-blur-xl
+    shadow-[0_20px_60px_-15px_rgba(0,0,0,0.1)]
+    p-8 md:p-10 mb-20 transition-all"
+  >
+    {/* Logo */}
+    <Image
+      src={"/logo.png"}
+      alt="logo"
+      width={200}
+      height={100}
+      className="w-32 mb-2"
+    />
+
+    <h2 className="mt-2 text-sm text-slate-500 tracking-wide">
+      AI-Powered Interview Platform
+    </h2>
+
+    {/* Illustration */}
+    <Image
+      src={"/interview.jpg"}
+      alt="interview"
+      width={300}
+      height={300}
+      className="w-64 my-6 rounded-2xl shadow-md"
+    />
+
+    {/* Job Title */}
+    <h2 className="font-extrabold text-2xl text-slate-900 tracking-tight">
+      {interviewData?.jobPosition}
+    </h2>
+
+    <h2 className="flex gap-2 items-center text-slate-500 mt-2 text-sm">
+      <Clock className="h-4 w-4" />
+      {interviewData?.duration}
+    </h2>
+
+    {/* Inputs */}
+    <div className="mt-6 w-full space-y-4">
+      <div>
+        <h2 className="text-sm font-semibold text-slate-700 mb-1">
+          Enter your full name
         </h2>
+        <Input
+          placeholder="e.g. Aditya Saketh"
+          className="h-11 rounded-xl focus-visible:ring-2 focus-visible:ring-sky-500"
+          onChange={(e) => setUserName(e.target.value)}
+        />
+      </div>
 
-        <div className="mt-5">
-          <h2>Enter your full name</h2>
-          <Input
-            placeholder="e.g. Aditya Saketh"
-            onChange={(event) => setUserName(event.target.value)}
-          />
-        </div>
-
-        <div className="mt-5">
-          <h2>Enter your Email</h2>
-          <Input
-            placeholder="e.g. aditya@gmail.com"
-            onChange={(event) => setUserEmail(event.target.value)}
-          />
-        </div>
-        <div className="p-3 bg-blue-100 flex gap-4 rounded-xl mt-5">
-          <Info className="text-primary" />
-          <div>
-            <h2 className="font-bold">Before you begin</h2>
-            <ul>
-              <li className="text-sm text-primary">
-                Test your camera and microphone
-              </li>
-              <li className="text-sm text-primary">
-                Ensure you have a stable internet connection
-              </li>
-              <li className="text-sm text-primary">
-                Find a Quiet place for interview
-              </li>
-            </ul>
-          </div>
-        </div>
-        <Button
-          className={"mt-5 font-bold mb-5"}
-          disabled={loading || !userName}
-          onClick = {() => onJoinInterview()}
-        >
-          <Video /> {loading && <Loader2Icon/>} Join Interview{" "}
-        </Button>
-        <div className="mt-5"> </div>
+      <div>
+        <h2 className="text-sm font-semibold text-slate-700 mb-1">
+          Enter your Email
+        </h2>
+        <Input
+          placeholder="e.g. aditya@gmail.com"
+          className="h-11 rounded-xl focus-visible:ring-2 focus-visible:ring-sky-500"
+          onChange={(e) => setUserEmail(e.target.value)}
+        />
       </div>
     </div>
+
+    {/* Info Box */}
+    <div className="p-4 bg-linear-to-r from-blue-50 to-sky-100 
+      flex gap-4 rounded-2xl mt-6 border border-blue-100 shadow-sm">
+      
+      <Info className="text-blue-600 mt-1" />
+      
+      <div>
+        <h2 className="font-bold text-blue-700 mb-1">
+          Before you begin
+        </h2>
+        <ul className="space-y-1">
+          <li className="text-sm text-blue-600">
+            Test your camera and microphone
+          </li>
+          <li className="text-sm text-blue-600">
+            Ensure you have a stable internet connection
+          </li>
+          <li className="text-sm text-blue-600">
+            Find a Quiet place for interview
+          </li>
+        </ul>
+      </div>
+    </div>
+
+    {/* Button */}
+    <Button
+      className="mt-8 w-full h-12 rounded-xl font-bold text-base 
+      shadow-lg shadow-sky-500/20 
+      hover:scale-[1.02] active:scale-95 transition-all"
+      disabled={loading || !userName}
+      onClick={onJoinInterview}
+    >
+      <Video className="mr-2" />
+      {loading && <Loader2Icon className="animate-spin mr-2" />}
+      Join Interview
+    </Button>
+  </div>
+</div>
   );
 }
 
