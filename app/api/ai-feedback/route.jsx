@@ -2,8 +2,17 @@ import { FEEDBACK_PROMPT } from "@/services/Constants";
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
 export async function POST(req) {
-    const { conversation } = await req.json();
-    const FINAL_PROMPT=FEEDBACK_PROMPT.replace('{{conversation}}',JSON.stringify(conversation))
+    const { jobPosition, jobDescription, conversation, type } = await req.json();
+    const cleanedConversation = conversation
+  .filter(msg => msg.role !== "system")
+  .map(msg => `${msg.role.toUpperCase()}: ${msg.content}`)
+  .join("\n");
+
+    const FINAL_PROMPT= FEEDBACK_PROMPT
+  .replace("{{jobPosition}}", jobPosition)
+  .replace("{{jobDescription}}", jobDescription)
+  .replace("{{interviewType}}", type)
+  .replace("{{conversation}}", cleanedConversation);
 
     try {
         const openai = new OpenAI({
@@ -11,10 +20,11 @@ export async function POST(req) {
             apiKey: process.env.OPENROUTER_API_KEY,
         })
         const completion = await openai.chat.completions.create({
-            model: "arcee-ai/trinity-large-preview:free",
+            model: "openai/gpt-oss-120b",
             messages: [
                 { role: "user", content: FINAL_PROMPT }
-            ]
+            ],
+            temperature: 0.3
         })
 
         return NextResponse.json(completion.choices[0].message)

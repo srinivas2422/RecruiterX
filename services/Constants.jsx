@@ -83,25 +83,97 @@ format: interviewQuestions = [
 🎯 The goal is to create a structured, relevant, and time-optimized interview plan for a {{jobTitle}} role.
 `
 
+export const FEEDBACK_PROMPT = `
+You are a senior technical interviewer.
 
+You are evaluating a candidate based on a real interview.
 
+========================
+JOB DETAILS:
+Role: {{jobPosition}}
+Interview Type: {{interviewType}}
+Job Description: {{jobDescription}}
+========================
 
-export const FEEDBACK_PROMPT = `{{conversation}}
-Depends on this Interview Conversation between assistant and user,
-Give me feedback for user interview. Give me rating out of 10 for technical Skills,
-Communication, Problem Solving, Experience. Also give me summery in 3 lines
-about the interview and one line to let me know whether is recommended
-for hire or not with msg. Give me response in JSON format
+========================
+CONVERSATION:
+{{conversation}}
+========================
+
+Your task is to evaluate the candidate strictly and realistically, like a real interviewer.
+
+⚠️ IMPORTANT RULES:
+- Be strict, not polite
+- Do NOT give high scores for vague or generic answers
+- Penalize incorrect or incomplete explanations
+- Evaluate ONLY based on the candidate’s responses
+- Consider the expectations of the given role and interview type
+
+----------------------------------
+
+EVALUATION CRITERIA:
+
+1. Technical Skills
+- Accuracy of concepts relevant to the role
+- Depth of explanation
+- Correct use of terminology
+- Understanding of tools/technologies (based on job description)
+
+2. Communication
+- Clarity of explanation
+- Structure of answers
+- Ability to explain complex ideas simply
+
+3. Problem Solving
+- Logical thinking
+- Step-by-step explanation
+- Ability to approach real-world scenarios
+
+4. Experience
+- Practical knowledge
+- Real-world exposure
+- Confidence and clarity in answers
+
+----------------------------------
+
+Also analyze:
+
+✅ Strengths (what candidate did well)  
+❌ Weaknesses (where candidate lacked)  
+⚠️ Missing Knowledge Areas (important gaps based on job role)
+
+----------------------------------
+
+SCORING RULES:
+- 9–10 → Excellent (production-level, deep knowledge)
+- 7–8 → Good (minor gaps)
+- 5–6 → Average (basic understanding, lacks depth)
+- 3–4 → Weak (many gaps, shallow answers)
+- 0–2 → Poor (incorrect or no understanding)
+
+----------------------------------
+
+Return STRICT JSON format:
+
 {
-  feedback:{
-    rating:{
-      techicalSkills:5,
-      communication:6,
-      problemSolving:4,
-      experince:7
+  "feedback": {
+    "rating": {
+      "technicalSkills": <0-10>,
+      "communication": <0-10>,
+      "problemSolving": <0-10>,
+      "experience": <0-10>
     },
-    summary:<in 3 Line>,
-    Recommendation:"",
-    RecommendationMsg:""
+    "strengths": ["point1", "point2"],
+    "weaknesses": ["point1", "point2"],
+    "missingSkills": ["point1", "point2"],
+    "summary": "<exactly 3 lines>",
+    "recommendation": "YES or NO",
+    "recommendationMsg": "<clear hiring decision in 1 line>"
   }
-}`
+}
+
+⚠️ FINAL INSTRUCTIONS:
+- Do NOT return anything outside JSON
+- Keep summary strictly 3 lines
+- Recommendation must be decisive (NO maybe)
+`;

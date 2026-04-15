@@ -21,7 +21,7 @@ export async function POST(req) {
     })
     
   const completion = await openai.chat.completions.create({
-    model: "arcee-ai/trinity-large-preview:free",
+    model: "openai/gpt-oss-20b:free",
     messages: [
       { role: "user", content: FINAL_PROMPT }
     ],

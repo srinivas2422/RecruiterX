@@ -4,15 +4,18 @@ import { Timer, Mic, Phone, Loader2Icon } from "lucide-react";
 import Image from "next/image";
 import React, { useContext, useEffect, useRef, useState } from "react";
 import Vapi from "@vapi-ai/web";
-import AlertConfirmation from "./_components/AlertConfirmation";
 import { toast } from "sonner";
 import axios from "axios";
 import { supabase } from "@/services/supabaseClient";
 import { useParams, useRouter } from "next/navigation";
+import * as faceapi from "face-api.js";
+import * as tf from "@tensorflow/tfjs";
+import "@tensorflow/tfjs-backend-webgl";
 
 function StartInterview() {
   const { interviewInfo } = useContext(InterviewDataContext);
-  const [conversation, setConversation] = useState();
+  const [conversation, setConversation] = useState([]);
+  const conversationRef = useRef([]);
   const { interview_id } = useParams();
   const router = useRouter();
   const [loading, setLoading] = useState();
@@ -21,18 +24,29 @@ function StartInterview() {
   const [seconds, setSeconds] = useState(0);
   const timerRef = useRef(null);
   const videoRef = useRef(null);
-
+  const lastSpeechTime = useRef(null);
+  const [emotion, setEmotion] = useState(null);
   const [activeSpeaker, setActiveSpeaker] = useState(null);
   const speakingTimeout = useRef(null);
-
+  const [speechConfidence, setSpeechConfidence] = useState(null);
   const [eyeContactScore, setEyeContactScore] = useState(null);
   const [headStability, setHeadStability] = useState(null);
   const [confidence, setConfidence] = useState(null);
   const prevNoseX = useRef(null);
-
+  const [isUserTurn, setIsUserTurn] = useState(false);
+  const questionEndTime = useRef(null);
   const faceMeshStarted = useRef(false);
   const isProcessing = useRef(false);
   const canvasRef = useRef(null);
+  const userSpeechStart = useRef(null);
+  const lastChunkTime = useRef(null);
+  const pauseTime = useRef(0);
+  const liveTranscript = useRef("");
+  const isUserSpeaking = useRef(false);
+  const [confidenceTimeline, setConfidenceTimeline] = useState([]);
+  const confidenceRef = useRef([]);
+  const isDetecting = useRef(false);
+  const confidenceValueRef = useRef(null);
 
   const formatTime = (sec) => {
     const h = String(Math.floor(sec / 3600)).padStart(2, "0");
@@ -149,7 +163,7 @@ function StartInterview() {
 
       // 🔥 SMOOTHING
       const smooth = (prev, curr) =>
-  prev === null ? curr : prev * 0.8 + curr * 0.2;
+        prev === null ? curr : prev * 0.8 + curr * 0.2;
 
       setEyeContactScore((prev) => smooth(prev, eyeScore));
       setHeadStability((prev) => smooth(prev, stability));
@@ -203,20 +217,110 @@ function StartInterview() {
   };
 
   useEffect(() => {
+    const loadModels = async () => {
+      const MODEL_URL = "/models";
+
+      // ✅ VERY IMPORTANT
+      await tf.ready();
+
+      // Optional but recommended (WebGL is faster)
+      await tf.setBackend("webgl");
+
+      console.log("TF Backend:", tf.getBackend());
+
+      // ✅ Load models AFTER backend is ready
+      await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+      await faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL);
+
+      console.log("FaceAPI Models Loaded");
+    };
+
+    loadModels();
+  }, []);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      detectEmotion();
+    }, 1000); // every 0.5 sec
+
+    return () => clearInterval(interval);
+  }, []);
+
+  const detectEmotion = async () => {
+    if (!videoRef.current || isDetecting.current) return;
+
+    isDetecting.current = true;
+
+    try {
+      const detections = await faceapi
+        .detectSingleFace(
+          videoRef.current,
+          new faceapi.TinyFaceDetectorOptions(),
+        )
+        .withFaceExpressions();
+
+      if (detections?.expressions) {
+        const exp = detections.expressions;
+
+        const maxEmotion = Object.keys(exp).reduce((a, b) =>
+          exp[a] > exp[b] ? a : b,
+        );
+
+        setEmotion(maxEmotion);
+      } else {
+        setEmotion(null);
+      }
+    } catch (err) {
+      console.log("Emotion error:", err);
+    }
+
+    isDetecting.current = false;
+  };
+
+  useEffect(() => {
     if (eyeContactScore === null || headStability === null) {
       setConfidence(null);
       return;
     }
 
-    const speakingBoost = activeSpeaker === "user" ? 0.2 : 0;
+    const emotionScoreMap = {
+      happy: 1,
+      neutral: 0.7,
+      surprised: 0.6,
+      sad: 0.3,
+      angry: 0.2,
+      fearful: 0.2,
+      disgusted: 0.2,
+    };
+
+    const emotionScore = emotionScoreMap[emotion] || 0.5;
+    const speechScore =
+      activeSpeaker === "user" ? (speechConfidence ?? 0.5) : 0.5;
+    const speakingBoost = activeSpeaker === "user" ? 0.1 : 0;
 
     const score =
-      eyeContactScore * 0.5 +
-      headStability * 0.3 +
+      eyeContactScore * 0.3 +
+      headStability * 0.2 +
+      emotionScore * 0.2 +
+      speechScore * 0.3 +
       speakingBoost;
 
     setConfidence(score.toFixed(2));
-  }, [eyeContactScore, headStability, activeSpeaker]);
+  }, [
+    eyeContactScore,
+    headStability,
+    emotion,
+    speechConfidence,
+    activeSpeaker,
+  ]);
+
+  useEffect(() => {
+    confidenceValueRef.current = confidence;
+  }, [confidence]);
+
+  useEffect(() => {
+  console.log("Confidence updated:", confidence);
+}, [confidence]);
 
   // ✅ Create Vapi ONLY once
   useEffect(() => {
@@ -226,19 +330,99 @@ function StartInterview() {
     const vapi = vapiRef.current;
 
     const handleMessage = (message) => {
-      console.log("Message:", message);
-      if (message?.conversation) {
-        const convoString = JSON.stringify(message.conversation);
-        console.log("Conversation string:", convoString);
-        setConversation(convoString);
+      console.log(message);
+      if (message.type === "conversation-update" && message.conversation) {
+        setConversation((prev) => {
+          conversationRef.current = message.conversation; // ✅ always latest
+          return message.conversation;
+        });
       }
-      if (message?.role === "assistant") {
+
+      const now = Date.now();
+
+      // =========================
+      // 🟣 SPEECH EVENTS
+      // =========================
+      if (message.type === "speech-update") {
+        // 🤖 AI finished → start user turn
+        if (message.role === "assistant" && message.status === "stopped") {
+          setIsUserTurn(true);
+
+          questionEndTime.current = now;
+
+          lastSpeechTime.current = null;
+          pauseTime.current = 0;
+          liveTranscript.current = "";
+
+          console.log("AI stopped → user turn");
+        }
+
+        // 👤 USER STARTED
+        if (message.role === "user" && message.status === "started") {
+          isUserSpeaking.current = true;
+
+          // 🎯 Delay calculation
+          if (isUserTurn && lastSpeechTime.current === null) {
+            const delay = (now - questionEndTime.current) / 1000;
+            lastSpeechTime.current = delay;
+            console.log("Delay:", delay);
+          }
+
+          userSpeechStart.current = now;
+          lastChunkTime.current = now;
+        }
+
+        // 👤 USER STOPPED
+        if (message.role === "user" && message.status === "stopped") {
+          isUserSpeaking.current = false;
+
+          console.log("User stopped");
+
+          // ❌ DO NOTHING (as per your requirement)
+          setIsUserTurn(false);
+        }
+      }
+
+      // =========================
+      // 🟢 REAL-TIME TRANSCRIPT
+      // =========================
+      if (message.type === "transcript" && message.role === "user") {
+        if (!isUserSpeaking.current) return;
+
+        setActiveSpeaker("user");
+
+        // 🧠 PAUSE DETECTION
+        if (lastChunkTime.current) {
+          const gap = (now - lastChunkTime.current) / 1000;
+
+          if (gap > 0.7) {
+            pauseTime.current += gap;
+            console.log("Pause:", gap);
+          }
+        }
+
+        lastChunkTime.current = now;
+
+        // 📝 LIVE TEXT UPDATE
+        liveTranscript.current = message.transcript;
+
+        // 🚀 REAL-TIME SCORE
+        const score = calculateLiveScore({
+          text: liveTranscript.current,
+          delay: lastSpeechTime.current || 0,
+          pauseTime: pauseTime.current,
+        });
+
+        setSpeechConfidence(score);
+      }
+
+      // =========================
+      // 🤖 AI UI
+      // =========================
+      if (message.type === "transcript" && message.role === "assistant") {
         setActiveSpeaker("ai");
       }
 
-      if (message?.role === "user") {
-        setActiveSpeaker("user");
-      }
       clearTimeout(speakingTimeout.current);
       speakingTimeout.current = setTimeout(() => {
         setActiveSpeaker(null);
@@ -248,9 +432,31 @@ function StartInterview() {
     vapi.on("call-start", () => {
       console.log("Call has started.");
       toast("Call Connected...");
+
       timerRef.current = setInterval(() => {
-        setSeconds((prev) => prev + 1);
-      }, 1000);
+  setSeconds((prev) => {
+    const newSec = prev + 1;
+
+    const currentConfidence = confidenceValueRef.current;
+
+    console.log("CONF:", currentConfidence); // 🔍 DEBUG
+
+    if (currentConfidence !== null) {
+      const point = {
+        time: new Date().toISOString(),
+        second: newSec,
+        value: Number(currentConfidence),
+      };
+
+      confidenceRef.current.push(point);
+
+      // optional UI update
+      setConfidenceTimeline([...confidenceRef.current]);
+    }
+
+    return newSec;
+  });
+}, 1000);
     });
 
     vapi.on("call-end", () => {
@@ -261,12 +467,14 @@ function StartInterview() {
       GenerateFeedback();
     });
 
-    vapi.on("message", handleMessage);
+    vapi.on("message", (msg) => {
+      handleMessage(msg);
+    });
 
     vapi.on("error", (err) => console.log("Vapi error:", err));
 
     return () => {
-      vapi.off("message", handleMessage);
+      vapi.off("message", () => console.log("END"));
       vapi.off("call-start", () => console.log("END"));
       vapi.off("call-end", () => console.log("END"));
       vapi.off("call-error", () => console.log("END"));
@@ -275,6 +483,80 @@ function StartInterview() {
       clearTimeout(speakingTimeout.current);
     };
   }, []);
+
+  const calculateLiveScore = ({ text, delay, pauseTime }) => {
+    const lowerText = text.toLowerCase().trim();
+
+    const fillers = ["um", "uh", "like", "you know", "hmm", "ah"];
+    let fillerCount = 0;
+
+    fillers.forEach((word) => {
+      const regex = new RegExp(`\\b${word}\\b`, "g");
+      const matches = lowerText.match(regex);
+      if (matches) fillerCount += matches.length;
+    });
+
+    const words = lowerText.split(" ").filter(Boolean);
+    const wordCount = words.length;
+
+    // 🟢 START with strong base (VERY IMPORTANT)
+    let score = 0.7;
+
+    // =========================
+    // ❗ DELAY (light penalty)
+    // =========================
+    if (delay > 5) score -= 0.15;
+    else if (delay > 3) score -= 0.1;
+    else if (delay > 2) score -= 0.05;
+
+    // =========================
+    // ❗ PAUSES (moderate penalty)
+    // =========================
+    if (pauseTime > 6) score -= 0.2;
+    else if (pauseTime > 4) score -= 0.15;
+    else if (pauseTime > 2) score -= 0.1;
+    else if (pauseTime > 1) score -= 0.05;
+
+    // =========================
+    // ❗ FILLERS (moderate)
+    // =========================
+    const fillerPenalty = Math.min(fillerCount * 0.04, 0.2);
+    score -= fillerPenalty;
+
+    // =========================
+    // ❗ VERY SHORT ANSWER
+    // =========================
+    if (wordCount < 3) score -= 0.3;
+    else if (wordCount < 6) score -= 0.15;
+
+    // =========================
+    // ✅ FLUENCY BOOST
+    // =========================
+    const fluency = Math.min(wordCount / 25, 1);
+    score += fluency * 0.25;
+
+    // =========================
+    // ✅ CONSISTENCY BONUS (low pauses)
+    // =========================
+    if (pauseTime < 1.5 && fillerCount === 0 && wordCount > 8) {
+      score += 0.1;
+    }
+
+    // =========================
+    // ❗ REPETITION PENALTY (light)
+    // =========================
+    const uniqueWords = new Set(words);
+    const repetitionRatio = uniqueWords.size / wordCount;
+
+    if (repetitionRatio < 0.5) score -= 0.1;
+
+    // =========================
+    // FINAL CLAMP
+    // =========================
+    score = Math.max(0, Math.min(1, score));
+
+    return Number(score.toFixed(2));
+  };
 
   // ✅ Start call safely
   useEffect(() => {
@@ -351,16 +633,35 @@ Key Guidelines:
   };
 
   const GenerateFeedback = async () => {
-    const result = await axios.post("/api/ai-feedback", {
-      conversation: conversation,
-    });
+    console.log("FINAL CONVERSATION:", conversationRef.current);
 
-    console.log(result?.data);
+    // ✅ 1. Fetch interview details
+    const { data: interviewData, error: interviewError } = await supabase
+      .from("Interviews")
+      .select("jobPosition, jobDescription, type")
+      .eq("interview_id", interview_id)
+      .single();
+
+    if (interviewError) {
+      console.log("Error fetching interview:", interviewError);
+      return;
+    }
+    console.log("Interview Data:", interviewData);
+
+    const result = await axios.post("/api/ai-feedback", {
+      conversation: conversationRef.current,
+      jobPosition: interviewData.jobPosition,
+      jobDescription: interviewData.jobDescription,
+      interviewType: interviewData.type,
+    });
+    console.log(result.data);
     const Content = result.data.content;
     const FINAL_CONTENT = Content.replace("```json", "").replace("```", "");
     console.log(FINAL_CONTENT);
 
     //Save to Database
+    const feedbackData = JSON.parse(FINAL_CONTENT);
+    console.log("FINAL TIMELINE:", confidenceRef.current);
 
     const { data, error } = await supabase
       .from("interview-feedback")
@@ -369,15 +670,21 @@ Key Guidelines:
           userName: interviewInfo?.userName,
           userEmail: interviewInfo?.userEmail,
           interview_id: interview_id,
-          feedback: JSON.parse(FINAL_CONTENT),
-          recommended: false,
+          feedback: feedbackData,
+          recommended: feedbackData.feedback.recommendation,
+          confidence_timeline: confidenceRef.current,
         },
       ])
       .select();
-    console.log(data);
+
+    if (error) {
+      console.error("Insert error:", error);
+    } else {
+      console.log("Saved:", data);
+    }
     router.replace("/interview/" + interview_id + "/completed");
   };
-  
+
   return (
     <div className="p-20 lg:px-48 xl:px-56">
       {/* HEADER */}
@@ -417,16 +724,9 @@ Key Guidelines:
         {/* USER */}
         <div
           className={`relative bg-white h-100 rounded-lg border flex flex-col items-center justify-center transition-all duration-300
-          ${activeSpeaker === "user" ? "scale-105 shadow-[0_0_50px_rgba(59,130,246,0.7)]" : ""}
+          ${activeSpeaker === "user" ? "scale-105" : ""}
         `}
         >
-          {activeSpeaker === "user" && (
-            <>
-              <div className="absolute w-48 h-48 border-4 border-blue-500 rounded-full animate-ping"></div>
-              <div className="absolute w-64 h-64 bg-blue-400/20 blur-3xl rounded-full"></div>
-            </>
-          )}
-
           <video
             ref={videoRef}
             autoPlay
@@ -451,6 +751,8 @@ Key Guidelines:
               <>
                 <p>Eye: {eyeContactScore.toFixed(2)}</p>
                 <p>Head: {headStability.toFixed(2)}</p>
+                <p>Emotion: {emotion}</p>
+                <p>Speech: {speechConfidence?.toFixed(2)}</p>
                 <p>Confidence: {confidence}</p>
               </>
             ) : (

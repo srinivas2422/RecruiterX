@@ -20,15 +20,18 @@ function InterviewLink({ interview_id, formData }) {
 
     return (
         <div className="flex items-center justify-center flex-col  mt-10">
-            <div>
-            <Image
-                src="/check.jpg"
-                alt="check"
-                width={100}
-                height={100}
-                className="w-[40px] h-[40px]"
-            />
-            </div>
+            <div className="rounded-full bg-gradient-to-tr from-green-400 to-emerald-500 p-5 shadow-lg shadow-green-500/30 animate-pulse">
+          <svg xmlns="http://www.w3.org/2000/svg"
+               className="h-12 w-12 text-white"
+               fill="none"
+               viewBox="0 0 24 24"
+               stroke="currentColor">
+            <path strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M5 13l4 4L19 7" />
+          </svg>
+        </div>
             <h2 className="font-bold text-lg mt-4">
                 Your AI Interview is Ready!
             </h2>
@@ -66,12 +69,6 @@ function InterviewLink({ interview_id, formData }) {
                         10 Questions
                     </h2>
 
-                    {/* 
-                    <h2 className="text-sm text-gray-500 flex gap-2 items-center">
-                        <Calendar className="h-4 w-4" />
-                        30 min {formData?.duration}
-                    </h2>
-                    */}
                 </div>
             </div>
 
@@ -104,7 +101,7 @@ function InterviewLink({ interview_id, formData }) {
                     </Button>
                 </Link>
 
-                <Link href="/create-interview">
+                <Link href="/dashboard/create-interview">
                     <Button>
                         <Plus />
                         Create New Interview
