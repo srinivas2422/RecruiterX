@@ -11,13 +11,6 @@ function CandidateFeedbackDialog({ candidate }) {
   const [open, setOpen] = useState(false);
   const feedback = candidate?.feedback?.feedback;
 
-  const avgScore = Math.round(
-    (feedback?.rating?.technicalSkills +
-      feedback?.rating?.communication +
-      feedback?.rating?.problemSolving +
-      feedback?.rating?.experience) /
-      4,
-  );
   console.log(candidate?.confidence_timeline);
   const timeline =
     typeof candidate?.confidence_timeline === "string"
@@ -94,7 +87,7 @@ function CandidateFeedbackDialog({ candidate }) {
                   <div className="text-center bg-white rounded-xl px-4 py-2 shadow-sm border">
                     <p className="text-xs text-gray-400 mb-1">Score</p>
                     <p className="text-green-600 font-bold text-2xl">
-                      {avgScore}/10
+                      {candidate?.final_score}/10
                     </p>
                   </div>
                 </div>

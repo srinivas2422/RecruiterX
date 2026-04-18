@@ -8,9 +8,7 @@ import { toast } from "sonner";
 import axios from "axios";
 import { supabase } from "@/services/supabaseClient";
 import { useParams, useRouter } from "next/navigation";
-import * as faceapi from "face-api.js";
-import * as tf from "@tensorflow/tfjs";
-import "@tensorflow/tfjs-backend-webgl";
+import * as faceapi from "@vladmandic/face-api";
 
 function StartInterview() {
   const { interviewInfo } = useContext(InterviewDataContext);
@@ -47,6 +45,10 @@ function StartInterview() {
   const confidenceRef = useRef([]);
   const isDetecting = useRef(false);
   const confidenceValueRef = useRef(null);
+  const [modelsLoaded, setModelsLoaded] = useState(false);
+
+  // ✅ FIX 1: Use a ref so detectEmotion always reads fresh value (no stale closure)
+  const modelsLoadedRef = useRef(false);
 
   const formatTime = (sec) => {
     const h = String(Math.floor(sec / 3600)).padStart(2, "0");
@@ -70,10 +72,13 @@ function StartInterview() {
     document.body.appendChild(script);
   }, []);
 
+  // ✅ FIX 3: Track stream and stop camera tracks on unmount
   useEffect(() => {
+    let stream = null;
+
     async function startCamera() {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
+        stream = await navigator.mediaDevices.getUserMedia({
           video: true,
           audio: false,
         });
@@ -83,7 +88,7 @@ function StartInterview() {
 
           videoRef.current.onloadeddata = () => {
             videoRef.current.play();
-            startFaceTracking(); // ✅ start here
+            startFaceTracking();
           };
         }
       } catch (err) {
@@ -92,6 +97,13 @@ function StartInterview() {
     }
 
     startCamera();
+
+    // ✅ Stop all camera tracks when component unmounts
+    return () => {
+      if (stream) {
+        stream.getTracks().forEach((track) => track.stop());
+      }
+    };
   }, []);
 
   const startFaceTracking = () => {
@@ -188,7 +200,6 @@ function StartInterview() {
       if (!videoRef.current || !canvasRef.current) return;
 
       if (time - lastTime < 100) {
-        // ✅ 10 FPS
         requestAnimationFrame(detect);
         return;
       }
@@ -216,62 +227,81 @@ function StartInterview() {
     detect();
   };
 
+  // ✅ FIX 2: Cancellation flag prevents setState on unmounted component
   useEffect(() => {
+    let cancelled = false;
+
     const loadModels = async () => {
-      const MODEL_URL = "/models";
+      try {
+        await faceapi.tf.setBackend("webgl");
+        await faceapi.tf.ready();
 
-      // ✅ VERY IMPORTANT
-      await tf.ready();
+        const MODEL_URL = "/models";
+        await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+        await faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL);
 
-      // Optional but recommended (WebGL is faster)
-      await tf.setBackend("webgl");
-
-      console.log("TF Backend:", tf.getBackend());
-
-      // ✅ Load models AFTER backend is ready
-      await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
-      await faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL);
-
-      console.log("FaceAPI Models Loaded");
+        // ✅ Only update state if component is still mounted
+        if (!cancelled) {
+          console.log("Models loaded ✅");
+          modelsLoadedRef.current = true; // ✅ FIX 1: also update ref
+          setModelsLoaded(true);
+        }
+      } catch (err) {
+        console.error("Model load error:", err);
+      }
     };
 
     loadModels();
+
+    // ✅ Cleanup: cancel any pending setState
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
+    if (!modelsLoaded) return;
+
     const interval = setInterval(() => {
       detectEmotion();
-    }, 1000); // every 0.5 sec
+    }, 1000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [modelsLoaded]);
 
   const detectEmotion = async () => {
-    if (!videoRef.current || isDetecting.current) return;
+    if (
+      !videoRef.current ||
+      isDetecting.current ||
+      !modelsLoadedRef.current || // ✅ FIX 1: use ref instead of state (no stale closure)
+      videoRef.current.readyState < 2 ||
+      videoRef.current.videoWidth === 0
+    )
+      return;
 
     isDetecting.current = true;
 
     try {
-      const detections = await faceapi
+      const detection = await faceapi
         .detectSingleFace(
           videoRef.current,
-          new faceapi.TinyFaceDetectorOptions(),
+          new faceapi.TinyFaceDetectorOptions({
+            inputSize: 224,
+            scoreThreshold: 0.3,
+          }),
         )
         .withFaceExpressions();
 
-      if (detections?.expressions) {
-        const exp = detections.expressions;
-
-        const maxEmotion = Object.keys(exp).reduce((a, b) =>
-          exp[a] > exp[b] ? a : b,
-        );
-
+      if (detection?.expressions) {
+        const maxEmotion = Object.entries(detection.expressions).reduce(
+          (a, b) => (a[1] > b[1] ? a : b),
+        )[0];
         setEmotion(maxEmotion);
       } else {
         setEmotion(null);
       }
     } catch (err) {
-      console.log("Emotion error:", err);
+      console.error("Emotion error:", err);
     }
 
     isDetecting.current = false;
@@ -319,8 +349,8 @@ function StartInterview() {
   }, [confidence]);
 
   useEffect(() => {
-  console.log("Confidence updated:", confidence);
-}, [confidence]);
+    console.log("Confidence updated:", confidence);
+  }, [confidence]);
 
   // ✅ Create Vapi ONLY once
   useEffect(() => {
@@ -333,35 +363,26 @@ function StartInterview() {
       console.log(message);
       if (message.type === "conversation-update" && message.conversation) {
         setConversation((prev) => {
-          conversationRef.current = message.conversation; // ✅ always latest
+          conversationRef.current = message.conversation;
           return message.conversation;
         });
       }
 
       const now = Date.now();
 
-      // =========================
-      // 🟣 SPEECH EVENTS
-      // =========================
       if (message.type === "speech-update") {
-        // 🤖 AI finished → start user turn
         if (message.role === "assistant" && message.status === "stopped") {
           setIsUserTurn(true);
-
           questionEndTime.current = now;
-
           lastSpeechTime.current = null;
           pauseTime.current = 0;
           liveTranscript.current = "";
-
           console.log("AI stopped → user turn");
         }
 
-        // 👤 USER STARTED
         if (message.role === "user" && message.status === "started") {
           isUserSpeaking.current = true;
 
-          // 🎯 Delay calculation
           if (isUserTurn && lastSpeechTime.current === null) {
             const delay = (now - questionEndTime.current) / 1000;
             lastSpeechTime.current = delay;
@@ -372,29 +393,20 @@ function StartInterview() {
           lastChunkTime.current = now;
         }
 
-        // 👤 USER STOPPED
         if (message.role === "user" && message.status === "stopped") {
           isUserSpeaking.current = false;
-
           console.log("User stopped");
-
-          // ❌ DO NOTHING (as per your requirement)
           setIsUserTurn(false);
         }
       }
 
-      // =========================
-      // 🟢 REAL-TIME TRANSCRIPT
-      // =========================
       if (message.type === "transcript" && message.role === "user") {
         if (!isUserSpeaking.current) return;
 
         setActiveSpeaker("user");
 
-        // 🧠 PAUSE DETECTION
         if (lastChunkTime.current) {
           const gap = (now - lastChunkTime.current) / 1000;
-
           if (gap > 0.7) {
             pauseTime.current += gap;
             console.log("Pause:", gap);
@@ -402,11 +414,8 @@ function StartInterview() {
         }
 
         lastChunkTime.current = now;
-
-        // 📝 LIVE TEXT UPDATE
         liveTranscript.current = message.transcript;
 
-        // 🚀 REAL-TIME SCORE
         const score = calculateLiveScore({
           text: liveTranscript.current,
           delay: lastSpeechTime.current || 0,
@@ -416,9 +425,6 @@ function StartInterview() {
         setSpeechConfidence(score);
       }
 
-      // =========================
-      // 🤖 AI UI
-      // =========================
       if (message.type === "transcript" && message.role === "assistant") {
         setActiveSpeaker("ai");
       }
@@ -434,29 +440,26 @@ function StartInterview() {
       toast("Call Connected...");
 
       timerRef.current = setInterval(() => {
-  setSeconds((prev) => {
-    const newSec = prev + 1;
+        setSeconds((prev) => {
+          const newSec = prev + 1;
+          const currentConfidence = confidenceValueRef.current;
 
-    const currentConfidence = confidenceValueRef.current;
+          console.log("CONF:", currentConfidence);
 
-    console.log("CONF:", currentConfidence); // 🔍 DEBUG
+          if (currentConfidence !== null) {
+            const point = {
+              time: new Date().toISOString(),
+              second: newSec,
+              value: Number(currentConfidence),
+            };
 
-    if (currentConfidence !== null) {
-      const point = {
-        time: new Date().toISOString(),
-        second: newSec,
-        value: Number(currentConfidence),
-      };
+            confidenceRef.current.push(point);
+            setConfidenceTimeline([...confidenceRef.current]);
+          }
 
-      confidenceRef.current.push(point);
-
-      // optional UI update
-      setConfidenceTimeline([...confidenceRef.current]);
-    }
-
-    return newSec;
-  });
-}, 1000);
+          return newSec;
+        });
+      }, 1000);
     });
 
     vapi.on("call-end", () => {
@@ -499,66 +502,38 @@ function StartInterview() {
     const words = lowerText.split(" ").filter(Boolean);
     const wordCount = words.length;
 
-    // 🟢 START with strong base (VERY IMPORTANT)
     let score = 0.7;
 
-    // =========================
-    // ❗ DELAY (light penalty)
-    // =========================
     if (delay > 5) score -= 0.15;
     else if (delay > 3) score -= 0.1;
     else if (delay > 2) score -= 0.05;
 
-    // =========================
-    // ❗ PAUSES (moderate penalty)
-    // =========================
     if (pauseTime > 6) score -= 0.2;
     else if (pauseTime > 4) score -= 0.15;
     else if (pauseTime > 2) score -= 0.1;
     else if (pauseTime > 1) score -= 0.05;
 
-    // =========================
-    // ❗ FILLERS (moderate)
-    // =========================
     const fillerPenalty = Math.min(fillerCount * 0.04, 0.2);
     score -= fillerPenalty;
 
-    // =========================
-    // ❗ VERY SHORT ANSWER
-    // =========================
     if (wordCount < 3) score -= 0.3;
     else if (wordCount < 6) score -= 0.15;
 
-    // =========================
-    // ✅ FLUENCY BOOST
-    // =========================
     const fluency = Math.min(wordCount / 25, 1);
     score += fluency * 0.25;
 
-    // =========================
-    // ✅ CONSISTENCY BONUS (low pauses)
-    // =========================
     if (pauseTime < 1.5 && fillerCount === 0 && wordCount > 8) {
       score += 0.1;
     }
 
-    // =========================
-    // ❗ REPETITION PENALTY (light)
-    // =========================
     const uniqueWords = new Set(words);
     const repetitionRatio = uniqueWords.size / wordCount;
-
     if (repetitionRatio < 0.5) score -= 0.1;
 
-    // =========================
-    // FINAL CLAMP
-    // =========================
     score = Math.max(0, Math.min(1, score));
-
     return Number(score.toFixed(2));
   };
 
-  // ✅ Start call safely
   useEffect(() => {
     const questions = interviewInfo?.interviewData?.questionList;
 
@@ -581,6 +556,17 @@ function StartInterview() {
         " , how are you? Ready for your interview on " +
         interviewInfo?.interviewData?.jobPosition,
 
+      // ✅ ADD THIS - required by newer Vapi versions
+      voice: {
+        provider: "playht",
+        voiceId: "jennifer",
+      },
+
+      transcriber: {
+        provider: "deepgram",
+        model: "nova-2",
+        language: "en-US",
+      },
       model: {
         provider: "openai",
         model: "gpt-4o",
@@ -595,7 +581,7 @@ Begin the conversation with a friendly introduction, setting a relaxed yet profe
 "Hey there! Welcome to your ` +
               interviewInfo?.interviewData?.jobPosition +
               ` interview. Let's get started with a few questions!"
-Ask one question at a time and wait for the candidate’s response before proceeding. Keep the questions clear and concise. Below are 
+Ask one question at a time and wait for the candidate's response before proceeding. Keep the questions clear and concise. Below are 
 the questions ask one by one:
 Questions: ` +
               questionList +
@@ -603,9 +589,9 @@ Questions: ` +
 If the candidate struggles, offer hints or rephrase the question without giving away the answer. Example:
 "Need a hint? Think about how React tracks component updates!"
 Provide brief, encouraging feedback after each answer. Example:
-"Nice! That’s a solid answer."
+"Nice! That's a solid answer."
 "Hmm, not quite! Want to try again?"
-Keep the conversation natural and engaging—use casual phrases like "Alright, next up..." or "Let’s tackle a tricky one!"
+Keep the conversation natural and engaging—use casual phrases like "Alright, next up..." or "Let's tackle a tricky one!"
 After 5–7 questions, wrap up the interview smoothly by summarizing their performance. Example:
 "That was great! You handled some tough questions well. Keep sharpening your skills!"
 End on a positive note:
@@ -613,7 +599,7 @@ End on a positive note:
 Key Guidelines:
 ✅ Be friendly, engaging, and witty 🎤  
 ✅ Keep responses short and natural, like a real conversation  
-✅ Adapt based on the candidate’s confidence level  
+✅ Adapt based on the candidate's confidence level  
 ✅ Ensure the interview remains focused on React
         `.trim(),
           },
@@ -632,10 +618,19 @@ Key Guidelines:
     vapiRef.current?.stop();
   };
 
+  const calculateAverageConfidence = () => {
+    if (!confidenceRef.current || confidenceRef.current.length === 0) return 0;
+
+    const sum = confidenceRef.current.reduce((acc, item) => {
+      return acc + (item.value || 0);
+    }, 0);
+
+    return Number((sum / confidenceRef.current.length).toFixed(2));
+  };
+
   const GenerateFeedback = async () => {
     console.log("FINAL CONVERSATION:", conversationRef.current);
 
-    // ✅ 1. Fetch interview details
     const { data: interviewData, error: interviewError } = await supabase
       .from("Interviews")
       .select("jobPosition, jobDescription, type")
@@ -659,9 +654,47 @@ Key Guidelines:
     const FINAL_CONTENT = Content.replace("```json", "").replace("```", "");
     console.log(FINAL_CONTENT);
 
-    //Save to Database
     const feedbackData = JSON.parse(FINAL_CONTENT);
     console.log("FINAL TIMELINE:", confidenceRef.current);
+
+    // =========================
+    // 🧠 NEW: FINAL ANALYSIS
+    // =========================
+    const analysisRes = await axios.post("/api/nlu-analysis", {
+      conversation: conversationRef.current,
+      jobRole: interviewData.jobPosition,
+    });
+
+    const analysis = analysisRes.data;
+
+    console.log("FINAL ANALYSIS:", analysis);
+
+    // =========================
+    // 📊 AVERAGE CONFIDENCE
+    // =========================
+    const avgConfidence = calculateAverageConfidence();
+
+    // ✅ 4. SKILL SCORES (already in your feedback)
+    const technical = feedbackData?.feedback?.rating?.technicalSkills || 0;
+    const communication = feedbackData?.feedback?.rating?.communication || 0;
+    const problemSolving = feedbackData?.feedback?.rating?.problemSolving || 0;
+    const experience = feedbackData?.feedback?.rating?.experience || 0;
+    const skillScore =
+      (technical + communication + problemSolving + experience) / 40;
+
+    const sentimentScore = analysis.sentiment_score || 0;
+    const nluScore = analysis.nlu_score || 0;
+
+    // ✅ 5. FINAL HOLISTIC SCORE
+    const finalScore =
+      avgConfidence * 0.3 +
+      sentimentScore * 0.1 +
+      nluScore * 0.2 +
+      skillScore * 0.4;
+
+    const finalFitScore = Number((finalScore * 10).toFixed(1));
+
+    console.log("FINAL SCORE:", finalFitScore);
 
     const { data, error } = await supabase
       .from("interview-feedback")
@@ -673,6 +706,14 @@ Key Guidelines:
           feedback: feedbackData,
           recommended: feedbackData.feedback.recommendation,
           confidence_timeline: confidenceRef.current,
+
+          avg_confidence: avgConfidence,
+
+          sentiment_score: analysis.sentiment_score,
+          nlu_score: analysis.nlu_score,
+          intent: analysis.intent,
+          detected_skills: analysis.skills_detected,
+          final_score: finalFitScore,
         },
       ])
       .select();
